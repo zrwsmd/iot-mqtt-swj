@@ -1,0 +1,18 @@
+{
+  "productKey": "k03k41dVanO",
+  "deviceName": "parkingLock1",
+  "productSecret":"",
+  "deviceSecret": "d7ee3a8a2c8718b0ad6766a0f2c42f54",
+  "instanceId": "iot-06z00bmkq776uhu",
+  "region": "cn-shanghai",
+  "subDevice": [
+    {
+      "productKey": "",
+      "deviceName": ""
+    },
+    {
+      "productKey": "",
+      "deviceName": ""
+    }
+  ]
+}
