@@ -35,7 +35,7 @@ public class HelloWorld {
     private String pk, dn;
     private ThingSample thingTestManager = null;
 
-    
+
 
     public static void main(String[] args) {
         ALog.d(TAG, "Hello world!");
@@ -142,6 +142,10 @@ public class HelloWorld {
         * 测试物模型，请参照testDeviceModel函数中的TODO注释将物模型字段替换为当前产品的物模型数据
         */
        testDeviceModel();
+
+        // 启动 Trace 模拟发送器
+        TraceSimulator simulator = new TraceSimulator(pk, dn);
+        simulator.start();
 
        /** 测试单纯mqtt通信能力
         * 物模型用例json的格式，用户可以通过自定义的topic使用自定义的格式, 用户可以使用SDK中单纯的mqtt通信能力满足这方面的开发需求
