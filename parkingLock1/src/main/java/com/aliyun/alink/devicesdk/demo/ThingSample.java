@@ -68,6 +68,7 @@ public class ThingSample extends BaseSample {
             }
         });
     }
+
     public void reportDemoProperty1(Map<String, ValueWrapper> reportData) {
         /**
          * TODO 用户根据实际情况填写 仅做参考
@@ -90,6 +91,7 @@ public class ThingSample extends BaseSample {
             }
         });
     }
+
     /**
      * 上报事件
      */
@@ -204,7 +206,7 @@ public class ThingSample extends BaseSample {
                     /**
                      *  异步服务下行处理
                      */
-                    ALog.d(TAG, "用户根据真实的服务返回服务的值，请参照set示例");
+                    ALog.d(TAG, "用户根据真实的服务返回服务的值，当前请求" + identify);
                     OutputParams outputParams = new OutputParams();
                     // outputParams.put("op", new ValueWrapper.IntValueWrapper(20));
                     /**
