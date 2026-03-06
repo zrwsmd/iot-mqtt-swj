@@ -18,6 +18,7 @@ import com.aliyun.alink.linksdk.channel.core.base.IOnCallListener;
 import com.aliyun.alink.linksdk.channel.core.persistent.mqtt.MqttConfigure;
 import com.aliyun.alink.linksdk.channel.core.persistent.mqtt.MqttInitParams;
 import com.aliyun.alink.linksdk.tmp.device.payload.ValueWrapper;
+import com.aliyun.alink.linksdk.tmp.listener.IPublishResourceListener;
 import com.aliyun.alink.linksdk.tools.AError;
 import com.aliyun.alink.linksdk.tools.ALog;
 import com.google.gson.Gson;
@@ -138,6 +139,8 @@ public class HelloWorld {
      */
     public void executeScheduler(DeviceInfoData deviceInfoData) {
 
+        clearIDEConnectionState(); // ← 上位机启动时先清空
+
        /**
         * 测试物模型，请参照testDeviceModel函数中的TODO注释将物模型字段替换为当前产品的物模型数据
         */
@@ -171,6 +174,24 @@ public class HelloWorld {
         *  测试获取设备影子
         */
        // testDeviceShadow();
+    }
+
+    // HelloWorld.java - executeScheduler() 里，在 testDeviceModel() 之前加
+    private void clearIDEConnectionState() {
+        Map<String, ValueWrapper> props = new HashMap<>();
+        props.put("hasIDEConnected", new ValueWrapper.BooleanValueWrapper(0));
+        props.put("IDEInfo",         new ValueWrapper.StringValueWrapper(""));
+        props.put("IDEHeartbeat",    new ValueWrapper.StringValueWrapper("0"));
+
+        LinkKit.getInstance().getDeviceThing().thingPropertyPost(props,
+                new IPublishResourceListener() {
+                    public void onSuccess(String alinkId, Object o) {
+                        ALog.i(TAG, "IDE连接状态已清空");
+                    }
+                    public void onError(String alinkId, AError aError) {
+                        ALog.e(TAG, "清空失败: " + aError.getMsg());
+                    }
+                });
     }
 
     /**
