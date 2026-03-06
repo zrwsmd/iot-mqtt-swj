@@ -40,9 +40,11 @@ public class ThingSample extends BaseSample {
     private final static String SERVICE_REQUEST_CONNECT    = "requestConnect";
     private final static String SERVICE_REQUEST_DISCONNECT = "requestDisconnect";
     private final static String SERVICE_IDE_HEARTBEAT      = "ideHeartbeat";
+    private final static String SERVICE_DEPLOY_PROJECT     = "deployProject";
 
     // IDE 连接管理器，在 setServiceHandler 时初始化
     private IDEConnectionManager ideConnectionManager;
+    private DeployManager deployManager;
 
     public ThingSample(String pk, String dn) {
         super(pk, dn);
@@ -116,6 +118,7 @@ public class ThingSample extends BaseSample {
 
         // 初始化 IDE 连接管理器
         ideConnectionManager = new IDEConnectionManager(productKey, deviceName);
+        deployManager = new DeployManager(productKey, deviceName);
 
         List<Service> srviceList = LinkKit.getInstance().getDeviceThing().getServices();
         for (int i = 0; srviceList != null && i < srviceList.size(); i++) {
@@ -171,6 +174,16 @@ public class ThingSample extends BaseSample {
                         itResResponseCallback.onComplete(identify, null, new OutputParams(output));
                     });
 
+                } else if (SERVICE_DEPLOY_PROJECT.equals(identify)) {
+                    // ── 处理 deployProject 服务 ───────────────────────────
+                    Map<String, ValueWrapper> params = getInputParams(result);
+                    deployManager.handleDeploy(params, (success, message, deployLog) -> {
+                        HashMap<String, ValueWrapper> output = new HashMap<>();
+                        output.put("success",   new ValueWrapper.BooleanValueWrapper(success ? 1 : 0));
+                        output.put("message",   new ValueWrapper.StringValueWrapper(message));
+                        output.put("deployLog", new ValueWrapper.StringValueWrapper(deployLog));
+                        itResResponseCallback.onComplete(identify, null, new OutputParams(output));
+                    });
                 } else {
                     // 其他未知服务，直接回复成功
                     ALog.d(TAG, "收到未处理的服务: " + identify);
