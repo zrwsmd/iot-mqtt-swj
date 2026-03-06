@@ -192,12 +192,23 @@ public class IDEConnectionManager extends BaseSample {
 
         Map<String, ValueWrapper> props = new HashMap<>();
         props.put(PROP_HAS_IDE_CONNECTED, new ValueWrapper.BooleanValueWrapper(1));
-        props.put(PROP_IDE_INFO,          new ValueWrapper.StringValueWrapper(
-                "clientId:" + clientId + " " + clientInfo));
-        props.put(PROP_IDE_HEARTBEAT,     new ValueWrapper.StringValueWrapper(
-                String.valueOf(lastHeartbeatMs)));
-
+        // 构造标准 JSON 格式，与 Node.js 端解析逻辑对应
+        String ideInfoJson = "{\"clientId\":\"" + clientId + "\","
+                + "\"clientInfo\":" + (isValidJson(clientInfo) ? clientInfo : "\"" + clientInfo + "\"") + ","
+                + "\"connectTime\":" + lastHeartbeatMs + "}";
+        props.put(PROP_IDE_INFO,      new ValueWrapper.StringValueWrapper(ideInfoJson));
+        props.put(PROP_IDE_HEARTBEAT, new ValueWrapper.StringValueWrapper(String.valueOf(lastHeartbeatMs)));
+//        props.put(PROP_IDE_INFO,          new ValueWrapper.StringValueWrapper(
+//                "clientId:" + clientId + " " + clientInfo));
+//        props.put(PROP_IDE_HEARTBEAT,     new ValueWrapper.StringValueWrapper(
+//                String.valueOf(lastHeartbeatMs)));
         reportProperties(props, "doLock clientId=" + clientId);
+    }
+
+    private boolean isValidJson(String s) {
+        if (s == null || s.isEmpty()) return false;
+        String t = s.trim();
+        return (t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"));
     }
 
     /**
