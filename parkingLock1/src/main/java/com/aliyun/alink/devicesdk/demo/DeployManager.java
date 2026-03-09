@@ -73,7 +73,7 @@ public class DeployManager extends BaseSample {
      * 回调给控制端的结果：
      * {
      *   "success":   true/false,
-     *   "message":   "部署成功" / "部署失败：xxx",
+     *   "message":   "deploy success / deploy failed: xxx",
      *   "deployLog": "完整日志..."
      * }
      */
@@ -83,63 +83,58 @@ public class DeployManager extends BaseSample {
         String deployPath    = getStringParam(params, "deployPath",    "/tmp/deploy");
         String deployCommand = getStringParam(params, "deployCommand", "");
 
-        ALog.i(TAG, "收到 deployProject 请求:"
+        ALog.i(TAG, "received deployProject:"
                 + " projectName=" + projectName
                 + " deployPath=" + deployPath
                 + " deployCommand=" + deployCommand);
 
         if (downloadUrl.isEmpty()) {
-            String msg = "部署失败：downloadUrl 不能为空";
+            String msg = "deploy failed: downloadUrl is empty";
             ALog.e(TAG, msg);
             reportDeployStatus(false, msg, "", projectName, deployPath);
             callback.onResult(false, msg, "");
             return;
         }
 
-        // 先立即回复控制端（异步部署中），避免服务调用超时
-        callback.onResult(true, "部署任务已接收，正在执行...", "");
+        // reply to controller immediately to avoid service call timeout
+        callback.onResult(true, "deploy task received, executing...", "");
 
-        // 异步执行部署，完成后上报 deployStatus 属性
+        // run deploy asynchronously, report deployStatus when done
         executor.submit(() -> {
             StringBuilder log = new StringBuilder();
             try {
-                // 1. 下载 zip
-                log.append("=== 开始下载 ===\n");
-                reportDeployStatus(false, "下载中...", log.toString(), projectName, deployPath);
+                // 1. download zip
+                log.append("=== download ===\n");
                 String zipFilePath = downloadZip(downloadUrl, projectName, log);
-                log.append("下载完成: ").append(zipFilePath).append("\n\n");
+                log.append("downloaded: ").append(zipFilePath).append("\n\n");
 
-                // 2. 解压
-                log.append("=== 开始解压 ===\n");
-                reportDeployStatus(false, "解压中...", log.toString(), projectName, deployPath);
+                // 2. extract
+                log.append("=== extract ===\n");
                 String targetPath = deployPath + File.separator + projectName;
                 extractZip(zipFilePath, targetPath, log);
-                log.append("解压完成: ").append(targetPath).append("\n\n");
+                log.append("extracted: ").append(targetPath).append("\n\n");
 
-                // 3. 清理 zip 临时文件
+                // 3. clean up zip
                 new File(zipFilePath).delete();
-                ALog.d(TAG, "临时文件已删除: " + zipFilePath);
+                ALog.d(TAG, "temp file deleted: " + zipFilePath);
 
-                // 4. 执行部署命令
+                // 4. run deploy command
                 if (!deployCommand.isEmpty()) {
-                    log.append("=== 执行部署命令 ===\n");
+                    log.append("=== run command ===\n");
                     log.append("$ ").append(deployCommand).append("\n");
-                    reportDeployStatus(false, "部署命令执行中...", log.toString(), projectName, targetPath);
                     runCommand(deployCommand, targetPath, log);
-                    log.append("\n部署命令执行完成\n");
+                    log.append("\ncommand done\n");
                 }
 
-                // 5. 上报成功
-                String successMsg = "部署成功";
-                log.append("\n=== ✅ 部署成功 ===\n");
-                ALog.i(TAG, successMsg + ": " + projectName);
-                reportDeployStatus(true, successMsg, log.toString(), projectName, targetPath);
+                // 5. report success (once)
+                log.append("\n=== deploy success ===\n");
+                ALog.i(TAG, "deploy success: " + projectName);
+                reportDeployStatus(true, "deploy success", log.toString(), projectName, targetPath);
 
             } catch (Exception e) {
-                String failMsg = "部署失败：" + e.getMessage();
-                log.append("\n=== ❌ 部署失败 ===\n").append(e.getMessage()).append("\n");
-                ALog.e(TAG, failMsg);
-                reportDeployStatus(false, failMsg, log.toString(), projectName, deployPath);
+                log.append("\n=== deploy failed ===\n").append(e.getMessage()).append("\n");
+                ALog.e(TAG, "deploy failed: " + e.getMessage());
+                reportDeployStatus(false, "deploy failed: " + e.getMessage(), log.toString(), projectName, deployPath);
             }
         });
     }
@@ -156,9 +151,9 @@ public class DeployManager extends BaseSample {
         String zipFileName = projectName + "-" + System.currentTimeMillis() + ".zip";
         String zipFilePath = tmpDir + File.separator + zipFileName;
 
-        ALog.i(TAG, "开始下载: " + downloadUrl + " -> " + zipFilePath);
-        log.append("下载地址: ").append(downloadUrl).append("\n");
-        log.append("保存路径: ").append(zipFilePath).append("\n");
+        ALog.i(TAG, "downloading: " + downloadUrl + " -> " + zipFilePath);
+        log.append("url: ").append(downloadUrl).append("\n");
+        log.append("save to: ").append(zipFilePath).append("\n");
 
         URL url = new URL(downloadUrl);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -168,7 +163,7 @@ public class DeployManager extends BaseSample {
 
         int responseCode = conn.getResponseCode();
         if (responseCode != HttpURLConnection.HTTP_OK) {
-            throw new IOException("下载失败，HTTP 状态码: " + responseCode);
+            throw new IOException("download failed, HTTP status: " + responseCode);
         }
 
         long totalBytes = conn.getContentLengthLong();
@@ -186,8 +181,8 @@ public class DeployManager extends BaseSample {
             conn.disconnect();
         }
 
-        log.append("下载大小: ").append(downloadedBytes / 1024).append(" KB\n");
-        ALog.i(TAG, "下载完成，大小: " + downloadedBytes / 1024 + " KB");
+        log.append("size: ").append(downloadedBytes / 1024).append(" KB\n");
+        ALog.i(TAG, "downloaded, size: " + downloadedBytes / 1024 + " KB");
         return zipFilePath;
     }
 
@@ -204,11 +199,11 @@ public class DeployManager extends BaseSample {
         // 清空旧目录
         if (targetDir.exists()) {
             deleteDirectory(targetDir);
-            log.append("已清空旧目录: ").append(targetPath).append("\n");
+            log.append("cleared old dir: ").append(targetPath).append("\n");
         }
         targetDir.mkdirs();
 
-        log.append("解压目标: ").append(targetPath).append("\n");
+        log.append("target: ").append(targetPath).append("\n");
         int fileCount = 0;
 
         try (ZipInputStream zis = new ZipInputStream(new FileInputStream(zipFilePath))) {
@@ -218,7 +213,7 @@ public class DeployManager extends BaseSample {
 
                 // 安全检查：防止 zip slip 攻击
                 if (!entryFile.getCanonicalPath().startsWith(targetDir.getCanonicalPath())) {
-                    throw new IOException("非法路径: " + entry.getName());
+                    throw new IOException("illegal path: " + entry.getName());
                 }
 
                 if (entry.isDirectory()) {
@@ -238,8 +233,8 @@ public class DeployManager extends BaseSample {
             }
         }
 
-        log.append("解压文件数: ").append(fileCount).append(" 个\n");
-        ALog.i(TAG, "解压完成，共 " + fileCount + " 个文件");
+        log.append("files extracted: ").append(fileCount).append("\n");
+        ALog.i(TAG, "extracted, files: " + fileCount + "");
     }
 
     // -------------------------------------------------------------------------
@@ -250,26 +245,26 @@ public class DeployManager extends BaseSample {
      * 在指定目录下执行 shell 命令，捕获输出
      */
     private void runCommand(String command, String workDir, StringBuilder log) throws IOException, InterruptedException {
-        ALog.i(TAG, "执行命令: " + command + " (工作目录: " + workDir + ")");
+        ALog.i(TAG, "run command: " + command + " (workdir: " + workDir + ")");
 
         ProcessBuilder pb = new ProcessBuilder();
 
         // 判断操作系统
         String os = System.getProperty("os.name").toLowerCase();
         if (os.contains("win")) {
-            pb.command("cmd.exe", "/c", command);
+            pb.command("cmd.exe", "/c", "chcp 65001 >nul && " + command);
         } else {
             pb.command("/bin/sh", "-c", command);
         }
 
         pb.directory(new File(workDir));
-        pb.redirectErrorStream(true); // 合并 stdout 和 stderr
+        pb.redirectErrorStream(true);
 
         Process process = pb.start();
 
-        // 读取输出
+        // read output as UTF-8
         try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(process.getInputStream()))) {
+                new InputStreamReader(process.getInputStream(), "UTF-8"))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 log.append(line).append("\n");
@@ -281,17 +276,17 @@ public class DeployManager extends BaseSample {
         boolean finished = process.waitFor(DEPLOY_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
         if (!finished) {
             process.destroyForcibly();
-            throw new IOException("部署命令执行超时（超过 " + DEPLOY_TIMEOUT_MS / 1000 + " 秒）");
+            throw new IOException("command timeout after " + DEPLOY_TIMEOUT_MS / 1000 + " seconds");
         }
 
         int exitCode = process.exitValue();
-        log.append("退出码: ").append(exitCode).append("\n");
+        log.append("exit code: ").append(exitCode).append("\n");
 
         if (exitCode != 0) {
-            throw new IOException("部署命令执行失败，退出码: " + exitCode);
+            throw new IOException("command failed, exit code: " + exitCode);
         }
 
-        ALog.i(TAG, "命令执行成功，退出码: " + exitCode);
+        ALog.i(TAG, "command done, exit code: " + exitCode);
     }
 
     // -------------------------------------------------------------------------
@@ -320,12 +315,12 @@ public class DeployManager extends BaseSample {
                 new IPublishResourceListener() {
                     @Override
                     public void onSuccess(String alinkId, Object o) {
-                        ALog.d(TAG, "deployStatus 上报成功");
+                        ALog.d(TAG, "deployStatus reported");
                     }
 
                     @Override
                     public void onError(String alinkId, AError aError) {
-                        ALog.e(TAG, "deployStatus 上报失败: "
+                        ALog.e(TAG, "deployStatus report failed: "
                                 + (aError == null ? "null" : aError.getMsg()));
                     }
                 });
@@ -374,7 +369,7 @@ public class DeployManager extends BaseSample {
      */
     public void shutdown() {
         executor.shutdown();
-        ALog.i(TAG, "DeployManager 已关闭");
+        ALog.i(TAG, "DeployManager shutdown");
     }
 
     // -------------------------------------------------------------------------
