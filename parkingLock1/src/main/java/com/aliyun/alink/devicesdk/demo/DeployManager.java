@@ -82,6 +82,7 @@ public class DeployManager extends BaseSample {
         String downloadUrl   = getStringParam(params, "downloadUrl",   "");
         String deployPath    = getStringParam(params, "deployPath",    "/tmp/deploy");
         String deployCommand = getStringParam(params, "deployCommand", "");
+        String startCommand = getStringParam(params, "startCommand", "");
 
         ALog.i(TAG, "received deployProject:"
                 + " projectName=" + projectName
@@ -124,6 +125,14 @@ public class DeployManager extends BaseSample {
                     log.append("$ ").append(deployCommand).append("\n");
                     runCommand(deployCommand, targetPath, log);
                     log.append("\ncommand done\n");
+                }
+
+                // 后台启动，不检查退出码
+                if (!startCommand.isEmpty()) {
+                    log.append("=== start service ===\n");
+                    log.append("$ ").append(startCommand).append("\n");
+                    runBackground(startCommand, targetPath, log);
+                    log.append("service started in background\n");
                 }
 
                 // 5. report success (once)
@@ -386,5 +395,27 @@ public class DeployManager extends BaseSample {
          * @param deployLog 当前日志（异步部署时为空）
          */
         void onResult(boolean success, String message, String deployLog);
+    }
+
+    private void runBackground(String command, String workDir, StringBuilder log) throws IOException {
+        ALog.i(TAG, "run background: " + command);
+
+        ProcessBuilder pb = new ProcessBuilder();
+        String os = System.getProperty("os.name").toLowerCase();
+        if (os.contains("win")) {
+            pb.command("cmd.exe", "/c", "start /b " + command);
+        } else {
+            pb.command("/bin/sh", "-c", command);
+        }
+
+        pb.directory(new File(workDir));
+        pb.redirectErrorStream(true);
+
+        // 启动后不等待，直接返回
+        Process process = pb.start();
+        process.getInputStream().close();
+
+        log.append("background process started (pid not tracked)\n");
+        ALog.i(TAG, "background process started");
     }
 }
