@@ -397,13 +397,13 @@ public class DeployManager extends BaseSample {
         void onResult(boolean success, String message, String deployLog);
     }
 
-    private void runBackground(String command, String workDir, StringBuilder log) throws IOException {
+    private void runBackground(String command, String workDir, StringBuilder log) throws IOException, InterruptedException {
         ALog.i(TAG, "run background: " + command);
 
         ProcessBuilder pb = new ProcessBuilder();
         String os = System.getProperty("os.name").toLowerCase();
         if (os.contains("win")) {
-            pb.command("cmd.exe", "/c", "start /b " + command);
+            pb.command("cmd.exe", "/c", command);
         } else {
             pb.command("/bin/sh", "-c", command);
         }
@@ -411,11 +411,28 @@ public class DeployManager extends BaseSample {
         pb.directory(new File(workDir));
         pb.redirectErrorStream(true);
 
-        // 启动后不等待，直接返回
         Process process = pb.start();
-        process.getInputStream().close();
 
-        log.append("background process started (pid not tracked)\n");
-        ALog.i(TAG, "background process started");
+        // 等 2 秒，看进程是否立即退出（命令不存在会立即退出）
+        boolean exited = process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS);
+        if (exited) {
+            // 2 秒内就退出了，读取输出看报错原因
+            String output = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(process.getInputStream(), "UTF-8"))
+                    .lines().collect(java.util.stream.Collectors.joining("\n"));
+            int exitCode = process.exitValue();
+            log.append("start command exited immediately, exit code: ").append(exitCode).append("\n");
+            if (!output.isEmpty()) {
+                log.append("output: ").append(output).append("\n");
+            }
+            // 退出码非 0 才算启动失败
+            if (exitCode != 0) {
+                throw new IOException("start command failed immediately, exit code: " + exitCode + ", output: " + output);
+            }
+        } else {
+            // 2 秒后还在跑，认为后台启动成功
+            log.append("service started in background\n");
+            ALog.i(TAG, "background process running");
+        }
     }
 }
