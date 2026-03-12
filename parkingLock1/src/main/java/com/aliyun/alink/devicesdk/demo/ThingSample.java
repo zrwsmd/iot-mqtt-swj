@@ -46,6 +46,7 @@ public class ThingSample extends BaseSample {
     // IDE 连接管理器，在 setServiceHandler 时初始化
     private IDEConnectionManager ideConnectionManager;
     private DeployManager deployManager;
+    private StartManager startManager;
 
     public ThingSample(String pk, String dn) {
         super(pk, dn);
@@ -120,6 +121,7 @@ public class ThingSample extends BaseSample {
         // 初始化 IDE 连接管理器
         ideConnectionManager = new IDEConnectionManager(productKey, deviceName);
         deployManager = new DeployManager(productKey, deviceName);
+        startManager = new StartManager(productKey, deviceName);
 
         List<Service> srviceList = LinkKit.getInstance().getDeviceThing().getServices();
         for (int i = 0; srviceList != null && i < srviceList.size(); i++) {
@@ -189,7 +191,7 @@ public class ThingSample extends BaseSample {
                 } else if (SERVICE_START_PROJECT.equals(identify)) {
                     // ── 处理 startProject 服务（后台启动，不下载不构建）──────
                     Map<String, ValueWrapper> params = getInputParams(result);
-                    deployManager.handleStartProject(params, (success, message) -> {
+                    startManager.handleStartProject(params, (success, message) -> {
                         HashMap<String, ValueWrapper> output = new HashMap<>();
                         output.put("success", new ValueWrapper.BooleanValueWrapper(success ? 1 : 0));
                         output.put("message", new ValueWrapper.StringValueWrapper(message));
