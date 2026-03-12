@@ -10,16 +10,22 @@ import com.aliyun.alink.linksdk.cmp.core.listener.IConnectSendListener;
 import com.aliyun.alink.linksdk.tools.AError;
 import com.aliyun.alink.linksdk.tools.ALog;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Trace 数据模拟发送器
  *
- * 核心机制：单线程同步逐包发送，每包等待 MQTT ACK 后再发下一包，
- * 失败自动重试（最多 MAX_RETRY 次），强保证所有包全部成功送达。
+ * 核心机制：单线程同步逐包发送，每包等待 MQTT ACK 后再发下一包。
+ * 用 ReentrantLock + AtomicReference<CountDownLatch> 保证同一时刻只有
+ * 一个 publish 在等待 ACK，回调通过 token 比对确认归属，彻底避免错乱。
  *
  * payload 示例：
  * {
@@ -39,18 +45,9 @@ import java.util.concurrent.atomic.AtomicLong;
  *       "servo_current":  4.812,
  *       "servo_voltage":  48.100,
  *       "pressure_bar":   5.230
- *     },
- *     {
- *       "ts": 2,
- *       "axis1_position": 13.001,
- *       ...
  *     }
  *   ]
  * }
- *
- * 使用方式（在 HelloWorld.executeScheduler 中调用）:
- *   TraceSimulator simulator = new TraceSimulator(pk, dn);
- *   simulator.start();
  */
 public class TraceSimulator extends BaseSample {
 
@@ -74,8 +71,24 @@ public class TraceSimulator extends BaseSample {
     // 每包 ACK 等待超时（秒）
     private static final int ACK_TIMEOUT_SECONDS = 10;
 
-    // 每包发送间隔（毫秒），避免 MQTT 积压
+    // 每包发送间隔（毫秒），避免 MQTT broker 端积压
     private static final long SEND_INTERVAL_MS = 100;
+
+    // -------------------------------------------------------------------------
+    // 防回调错乱的核心机制
+    //
+    // sendLock：保证同一时刻只有一个 publishAndWaitAck 在执行，
+    //           从 publish 发出到 ACK 收到整个过程持锁，SDK 内部
+    //           回调线程只能在 latch.countDown() 后才能被下一个 publish 覆盖。
+    //
+    // activeToken：每次 publish 前生成一个唯一 token（seq 编号），
+    //              回调闭包捕获该 token，触发时与 activeToken 比对，
+    //              只有 token 匹配才操作 latch，彻底过滤掉迟到的旧回调。
+    // -------------------------------------------------------------------------
+    private final ReentrantLock sendLock = new ReentrantLock();
+    private final AtomicReference<CountDownLatch> activeLatch = new AtomicReference<>();
+    private final AtomicReference<AtomicBoolean>  activeSuccess = new AtomicReference<>();
+    private final AtomicLong activeToken = new AtomicLong(-1);
 
     // 发送工作线程
     private Thread sendThread;
@@ -83,7 +96,9 @@ public class TraceSimulator extends BaseSample {
 
     // 发送统计
     private final AtomicLong successCount = new AtomicLong(0);
-    private final AtomicLong retryCount = new AtomicLong(0);
+    private final AtomicLong retryCount   = new AtomicLong(0);
+    // 记录发生过重试的 seq 列表（线程安全，sendLoop 单线程写，awaitComplete 后读）
+    private final List<Long> retrySeqs = Collections.synchronizedList(new ArrayList<>());
 
     /**
      * 默认：1ms 采集周期，每包 100 个 frame，每 100ms 发一次
@@ -110,8 +125,7 @@ public class TraceSimulator extends BaseSample {
 
     /**
      * 异步启动发送线程。
-     * 发送线程会逐包同步发送，每包等待 ACK 成功后才发下一包。
-     * 如果需要等待全部发送完成，调用 start() 后再调用 awaitComplete()。
+     * 如需等待全部发送完成，调用 start() 后再调用 awaitComplete()。
      */
     public void start() {
         if (running) {
@@ -119,7 +133,6 @@ public class TraceSimulator extends BaseSample {
             return;
         }
 
-        // 重置计数器
         successCount.set(0);
         retryCount.set(0);
         running = true;
@@ -127,16 +140,15 @@ public class TraceSimulator extends BaseSample {
         long expectedBatches = (MAX_FRAMES + batchSize - 1) / batchSize;
 
         ALog.i(TAG, "TraceSimulator 启动:"
-                + " periodMs=" + periodMs
-                + " batchSize=" + batchSize
-                + " maxFrames=" + MAX_FRAMES
+                + " periodMs="      + periodMs
+                + " batchSize="     + batchSize
+                + " maxFrames="     + MAX_FRAMES
                 + " expectedBatches=" + expectedBatches
-                + " maxRetry=" + MAX_RETRY
-                + " ackTimeout=" + ACK_TIMEOUT_SECONDS + "s"
-                + " sendInterval=" + SEND_INTERVAL_MS + "ms"
-                + " topic=" + buildTopic());
+                + " maxRetry="      + MAX_RETRY
+                + " ackTimeout="    + ACK_TIMEOUT_SECONDS + "s"
+                + " sendInterval="  + SEND_INTERVAL_MS + "ms"
+                + " topic="         + buildTopic());
 
-        // 非守护线程，保证 JVM 不会提前退出
         sendThread = new Thread(this::sendLoop, "trace-simulator");
         sendThread.setDaemon(false);
         sendThread.start();
@@ -144,7 +156,6 @@ public class TraceSimulator extends BaseSample {
 
     /**
      * 阻塞等待所有数据发送完成。
-     * 调用此方法保证 MAX_FRAMES 帧全部成功发送后才返回。
      */
     public void awaitComplete() {
         if (sendThread == null) {
@@ -163,7 +174,6 @@ public class TraceSimulator extends BaseSample {
 
     /**
      * 同步启动并等待发送完成（便捷方法）。
-     * 调用后会阻塞直到所有帧全部成功发送完毕。
      */
     public void startAndWait() {
         start();
@@ -184,28 +194,31 @@ public class TraceSimulator extends BaseSample {
 
     private void sendLoop() {
         long totalBatches = (MAX_FRAMES + batchSize - 1) / batchSize;
-        long frameSent = 0;
-        long tsCounter = 0;
+        long frameSent    = 0;
+        long tsCounter    = 0;
 
         ALog.i(TAG, "发送循环开始，共需发送 " + totalBatches + " 包（" + MAX_FRAMES + " 帧）");
 
         for (long seq = 1; seq <= totalBatches && running; seq++) {
+
             // 构造当前包的 frames
             JSONArray frames = new JSONArray();
             int frameCount = 0;
-
             for (int i = 0; i < batchSize; i++) {
                 tsCounter++;
-                if (tsCounter > MAX_FRAMES) {
-                    break;
-                }
+                if (tsCounter > MAX_FRAMES) break;
 
                 JSONObject frame = new JSONObject();
-                frame.put("ts", tsCounter);
+                frame.put("ts",             tsCounter);
                 frame.put("axis1_position", simulateAxis1Position(tsCounter));
                 frame.put("axis1_velocity", simulateAxis1Velocity(tsCounter));
                 frame.put("axis1_torque",   simulateAxis1Torque(tsCounter));
+                frame.put("axis2_position", simulateAxis2Position(tsCounter));
+                frame.put("axis2_velocity", simulateAxis2Velocity(tsCounter));
                 frame.put("motor_rpm",      simulateMotorRpm(tsCounter));
+                frame.put("motor_temp",     simulateMotorTemp(tsCounter));
+                frame.put("servo_current",  simulateServoCurrent(tsCounter));
+                frame.put("servo_voltage",  simulateServoVoltage(tsCounter));
                 frame.put("pressure_bar",   simulatePressure(tsCounter));
                 frames.add(frame);
                 frameCount++;
@@ -221,29 +234,29 @@ public class TraceSimulator extends BaseSample {
             frameSent += frameCount;
             long tsStart = tsCounter - frameCount + 1;
 
-            // 同步发送，失败重试
+            // ── 同步发送，失败重试（重试只重发同一份 payloadStr，不重新推进 tsCounter）──
             boolean sent = false;
             for (int attempt = 1; attempt <= MAX_RETRY && !sent && running; attempt++) {
                 if (attempt > 1) {
                     retryCount.incrementAndGet();
+                    retrySeqs.add(seq);
                     ALog.w(TAG, "重试第 " + attempt + " 次: seq=" + seq);
                     try {
-                        Thread.sleep(500 * attempt);
+                        Thread.sleep(500L * attempt);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         return;
                     }
                 }
-
                 sent = publishAndWaitAck(seq, payloadStr, frameCount, tsStart, tsCounter, frameSent);
             }
 
             if (!sent) {
-                ALog.e(TAG, "seq=" + seq + " 重试 " + MAX_RETRY + " 次后仍失败！终止发送。");
+                ALog.e(TAG, "seq=" + seq + " 重试 " + MAX_RETRY + " 次后仍失败，终止发送。");
                 break;
             }
 
-            // 发送间隔，避免 MQTT 积压
+            // 发送间隔
             if (seq < totalBatches) {
                 try {
                     Thread.sleep(SEND_INTERVAL_MS);
@@ -254,72 +267,113 @@ public class TraceSimulator extends BaseSample {
             }
         }
 
-        // 打印最终统计
         running = false;
+        long totalBatchesFinal = (MAX_FRAMES + batchSize - 1) / batchSize;
         ALog.i(TAG, "========== TraceSimulator 最终统计 ==========");
         ALog.i(TAG, "总帧数: " + frameSent + " / " + MAX_FRAMES);
-        ALog.i(TAG, "总包数: " + successCount.get() + " / " + totalBatches);
-        ALog.i(TAG, "发送成功: " + successCount.get() + " 包");
+        ALog.i(TAG, "总包数: " + successCount.get() + " / " + totalBatchesFinal);
         ALog.i(TAG, "重试次数: " + retryCount.get() + " 次");
-        ALog.i(TAG, "结果: " + (successCount.get() == totalBatches ? "全部成功" : "存在失败"));
-        ALog.i(TAG, "============================================");
+        if (retrySeqs.isEmpty()) {
+            ALog.i(TAG, "重试包: 无");
+        } else {
+            ALog.i(TAG, "重试包: seq=" + retrySeqs.toString());
+        }
+        ALog.i(TAG, "结果: " + (successCount.get() == totalBatchesFinal ? "全部成功 ✓" : "存在失败 ✗"));
+        ALog.i(TAG, "=============================================");
     }
 
     /**
      * 发送一包数据并同步等待 ACK。
-     * 返回 true 表示成功，false 表示失败（需重试）。
+     *
+     * 持有 sendLock 期间执行完整的 publish→等待ACK 流程，
+     * 保证同一时刻只有一个包在飞；
+     * 每次 publish 前更新 activeToken，回调通过 token 比对确认归属，
+     * 过滤掉任何迟到的旧回调。
+     *
+     * @return true 表示成功，false 表示失败（需重试）
      */
     private boolean publishAndWaitAck(long seq, String payloadStr, int frameCount,
-                                       long tsStart, long tsEnd, long totalSent) {
-        final CountDownLatch ackLatch = new CountDownLatch(1);
-        final AtomicBoolean ackSuccess = new AtomicBoolean(false);
-
-        ALog.d(TAG, "PUBLISH seq=" + seq
-                + " frames=" + frameCount
-                + " ts=[" + tsStart + "~" + tsEnd + "]"
-                + " totalSent=" + totalSent + "/" + MAX_FRAMES
-                + " size=" + payloadStr.length() + "bytes");
-
-        MqttPublishRequest request = new MqttPublishRequest();
-        request.topic      = buildTopic();
-        request.qos        = 1;
-        request.payloadObj = payloadStr;
-
-        LinkKit.getInstance().publish(request, new IConnectSendListener() {
-            @Override
-            public void onResponse(ARequest aRequest, AResponse aResponse) {
-                ackSuccess.set(true);
-                ackLatch.countDown();
-            }
-
-            @Override
-            public void onFailure(ARequest aRequest, AError aError) {
-                ALog.e(TAG, "PUBLISH 回调失败: seq=" + seq
-                        + " error=" + (aError == null ? "null"
-                        : aError.getCode() + "/" + aError.getMsg()));
-                ackSuccess.set(false);
-                ackLatch.countDown();
-            }
-        });
-
-        // 同步等待 ACK
+                                      long tsStart, long tsEnd, long totalSent) {
+        sendLock.lock();
         try {
-            boolean completed = ackLatch.await(ACK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            // 为本次 publish 分配唯一 token
+            final long token = seq;
+            final CountDownLatch latch   = new CountDownLatch(1);
+            final AtomicBoolean  success = new AtomicBoolean(false);
+
+            activeLatch.set(latch);
+            activeSuccess.set(success);
+            activeToken.set(token);
+
+            ALog.d(TAG, "PUBLISH seq=" + seq
+                    + " frames=" + frameCount
+                    + " ts=[" + tsStart + "~" + tsEnd + "]"
+                    + " totalSent=" + totalSent + "/" + MAX_FRAMES
+                    + " size=" + payloadStr.length() + "B");
+
+            MqttPublishRequest request = new MqttPublishRequest();
+            request.topic      = buildTopic();
+            request.qos        = 1;
+            request.payloadObj = payloadStr;
+
+            LinkKit.getInstance().publish(request, new IConnectSendListener() {
+                @Override
+                public void onResponse(ARequest aRequest, AResponse aResponse) {
+                    // token 比对：只处理属于本次 publish 的回调
+                    if (activeToken.get() == token) {
+                        success.set(true);
+                        latch.countDown();
+                    } else {
+                        ALog.w(TAG, "onResponse: 忽略迟到回调 token=" + token
+                                + " activeToken=" + activeToken.get());
+                    }
+                }
+
+                @Override
+                public void onFailure(ARequest aRequest, AError aError) {
+                    if (activeToken.get() == token) {
+                        ALog.e(TAG, "PUBLISH 失败 seq=" + seq + " error="
+                                + (aError == null ? "null"
+                                : aError.getCode() + "/" + aError.getMsg()));
+                        success.set(false);
+                        latch.countDown();
+                    } else {
+                        ALog.w(TAG, "onFailure: 忽略迟到回调 token=" + token
+                                + " activeToken=" + activeToken.get());
+                    }
+                }
+            });
+
+            // 等待 ACK
+            boolean completed = latch.await(ACK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            // 清理，防止后续迟到回调干扰
+            activeToken.set(-1);
+            activeLatch.set(null);
+            activeSuccess.set(null);
+
             if (!completed) {
-                ALog.e(TAG, "PUBLISH 超时: seq=" + seq + " (等待 " + ACK_TIMEOUT_SECONDS + "s 无响应)");
+                ALog.e(TAG, "PUBLISH 超时: seq=" + seq
+                        + "（等待 " + ACK_TIMEOUT_SECONDS + "s 无响应）");
                 return false;
             }
+
+            if (success.get()) {
+                long ok = successCount.incrementAndGet();
+                long totalBatches = (MAX_FRAMES + batchSize - 1) / batchSize;
+                ALog.d(TAG, "PUBLISH 成功: seq=" + seq
+                        + " (" + ok + "/" + totalBatches + ")");
+                return true;
+            }
+
+            return false;
+
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return false;
+        } finally {
+            sendLock.unlock();
         }
-
-        if (ackSuccess.get()) {
-            long ok = successCount.incrementAndGet();
-            ALog.d(TAG, "PUBLISH 成功: seq=" + seq + " (成功" + ok + "包/共" + ((MAX_FRAMES + batchSize - 1) / batchSize) + "包)");
-            return true;
-        }
-        return false;
     }
 
     // -------------------------------------------------------------------------
