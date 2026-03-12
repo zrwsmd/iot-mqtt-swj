@@ -98,11 +98,12 @@ public class StartManager extends BaseSample {
         ALog.i(TAG, "run background: " + command);
 
         ProcessBuilder pb = new ProcessBuilder();
+        // Linux 用 bash -l（login shell）加载 ~/.profile，确保 nvm 等工具的 PATH 可见
         String os = System.getProperty("os.name").toLowerCase();
         if (os.contains("win")) {
             pb.command("cmd.exe", "/c", command);
         } else {
-            pb.command("/bin/sh", "-c", command);
+            pb.command("/bin/bash", "-l", "-c", command);
         }
 
         pb.directory(new File(workDir));
