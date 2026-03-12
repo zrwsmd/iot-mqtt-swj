@@ -20,15 +20,15 @@ import java.util.zip.ZipInputStream;
 /**
  * 项目部署管理器
  *
- * 负责处理控制端下发的 deployProject 服务调用，完整流程：
- *   1. 从 OSS 下载 zip 压缩包
- *   2. 解压到指定目录
- *   3. 执行部署命令
- *   4. 上报 deployStatus 属性到云端
+ * 负责处理控制端下发的物模型服务调用：
+ *
+ *   deployProject  — 下载 zip + 解压 + 执行构建命令（不负责启动）
+ *   startProject   — 在指定目录后台执行启动命令（不下载不构建）
  *
  * 使用方式（在 ThingSample 的 onProcess 里调用）：
  *   DeployManager deployManager = new DeployManager(pk, dn);
  *   deployManager.handleDeploy(params, callback);
+ *   deployManager.handleStartProject(params, callback);
  */
 public class DeployManager extends BaseSample {
 
@@ -61,6 +61,8 @@ public class DeployManager extends BaseSample {
 
     /**
      * 处理 deployProject 服务调用
+     * 职责：下载 zip → 解压 → 执行 deployCommand（构建），不负责启动
+     * 启动由 startProject 服务单独处理
      *
      * 控制端传入的 params：
      * {
@@ -82,7 +84,6 @@ public class DeployManager extends BaseSample {
         String downloadUrl   = getStringParam(params, "downloadUrl",   "");
         String deployPath    = getStringParam(params, "deployPath",    "/tmp/deploy");
         String deployCommand = getStringParam(params, "deployCommand", "");
-        String startCommand = getStringParam(params, "startCommand", "");
 
         ALog.i(TAG, "received deployProject:"
                 + " projectName=" + projectName
@@ -127,14 +128,6 @@ public class DeployManager extends BaseSample {
                     log.append("\ncommand done\n");
                 }
 
-                // 后台启动，不检查退出码
-                if (!startCommand.isEmpty()) {
-                    log.append("=== start service ===\n");
-                    log.append("$ ").append(startCommand).append("\n");
-                    runBackground(startCommand, targetPath, log);
-                    log.append("service started in background\n");
-                }
-
                 // 5. report success (once)
                 log.append("\n=== deploy success ===\n");
                 ALog.i(TAG, "deploy success: " + projectName);
@@ -144,6 +137,58 @@ public class DeployManager extends BaseSample {
                 log.append("\n=== deploy failed ===\n").append(e.getMessage()).append("\n");
                 ALog.e(TAG, "deploy failed: " + e.getMessage());
                 reportDeployStatus(false, "deploy failed: " + e.getMessage(), log.toString(), projectName, deployPath);
+            }
+        });
+    }
+
+    /**
+     * 处理 startProject 服务调用
+     * 职责：在指定目录后台执行 startCommand，不下载不构建
+     *
+     * 控制端传入的 params：
+     * {
+     *   "projectName":  "my-project",
+     *   "deployPath":   "/home/user/projects",
+     *   "startCommand": "pm2 start dist/index.js --name my-project"
+     * }
+     *
+     * 回调给控制端的结果：
+     * {
+     *   "success": true/false,
+     *   "message": "service started in background / start failed: xxx"
+     * }
+     */
+    public void handleStartProject(Map<String, ValueWrapper> params, SimpleCallback callback) {
+        String projectName  = getStringParam(params, "projectName",  "project");
+        String deployPath   = getStringParam(params, "deployPath",   "/tmp/deploy");
+        String startCommand = getStringParam(params, "startCommand", "");
+
+        String targetPath = deployPath + File.separator + projectName;
+
+        ALog.i(TAG, "received startProject:"
+                + " projectName=" + projectName
+                + " targetPath=" + targetPath
+                + " startCommand=" + startCommand);
+
+        if (startCommand.isEmpty()) {
+            String msg = "start failed: startCommand is empty";
+            ALog.e(TAG, msg);
+            callback.onResult(false, msg);
+            return;
+        }
+
+        // 提交到线程池，runBackground 最多等 2 秒即返回
+        executor.submit(() -> {
+            StringBuilder log = new StringBuilder();
+            try {
+                log.append("=== start service ===\n");
+                log.append("$ ").append(startCommand).append("\n");
+                runBackground(startCommand, targetPath, log);
+                ALog.i(TAG, "startProject success: " + projectName);
+                callback.onResult(true, "service started in background");
+            } catch (Exception e) {
+                ALog.e(TAG, "startProject failed: " + e.getMessage());
+                callback.onResult(false, "start failed: " + e.getMessage());
             }
         });
     }
@@ -386,7 +431,7 @@ public class DeployManager extends BaseSample {
     // -------------------------------------------------------------------------
 
     /**
-     * 部署结果回调（立即返回给控制端，实际部署异步进行）
+     * deployProject 部署结果回调（立即返回给控制端，实际部署异步进行）
      */
     public interface DeployCallback {
         /**
@@ -395,6 +440,17 @@ public class DeployManager extends BaseSample {
          * @param deployLog 当前日志（异步部署时为空）
          */
         void onResult(boolean success, String message, String deployLog);
+    }
+
+    /**
+     * startProject 启动结果回调
+     */
+    public interface SimpleCallback {
+        /**
+         * @param success 是否启动成功
+         * @param message 返回给控制端的描述信息
+         */
+        void onResult(boolean success, String message);
     }
 
     private void runBackground(String command, String workDir, StringBuilder log) throws IOException, InterruptedException {
