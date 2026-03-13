@@ -15,22 +15,22 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * IDE 控制端连接锁管理器
- *
+ * <p>
  * 负责管理三个物模型属性：
- *   hasIDEConnected  (bool)   - 是否有IDE已连接
- *   IDEInfo          (text)   - 已连接IDE的信息（clientId、IP等）
- *   IDEHeartbeat     (text)   - 最后心跳时间戳（毫秒字符串）
- *
+ * hasIDEConnected  (bool)   - 是否有IDE已连接
+ * IDEInfo          (text)   - 已连接IDE的信息（clientId、IP等）
+ * IDEHeartbeat     (text)   - 最后心跳时间戳（毫秒字符串）
+ * <p>
  * 核心规则：
- *   - 上位机是唯一写入方，所有状态变更都由上位机决定
- *   - 控制端通过调用 requestConnect 服务发起连接申请
- *   - 心跳超过 HEARTBEAT_TIMEOUT_MS 未更新，视为控制端已掉线，锁自动释放
- *
+ * - 上位机是唯一写入方，所有状态变更都由上位机决定
+ * - 控制端通过调用 requestConnect 服务发起连接申请
+ * - 心跳超过 HEARTBEAT_TIMEOUT_MS 未更新，视为控制端已掉线，锁自动释放
+ * <p>
  * 使用方式（在 ThingSample 的 onProcess 里调用）：
- *   IDEConnectionManager manager = new IDEConnectionManager(pk, dn);
- *   manager.handleRequestConnect(params, callback);
- *   manager.handleDisconnect(params, callback);
- *   manager.handleHeartbeat(params, callback);
+ * IDEConnectionManager manager = new IDEConnectionManager(pk, dn);
+ * manager.handleRequestConnect(params, callback);
+ * manager.handleDisconnect(params, callback);
+ * manager.handleHeartbeat(params, callback);
  */
 public class IDEConnectionManager extends BaseSample {
 
@@ -38,8 +38,8 @@ public class IDEConnectionManager extends BaseSample {
 
     // 物模型属性标识符
     public static final String PROP_HAS_IDE_CONNECTED = "hasIDEConnected";
-    public static final String PROP_IDE_INFO          = "IDEInfo";
-    public static final String PROP_IDE_HEARTBEAT     = "IDEHeartbeat";
+    public static final String PROP_IDE_INFO = "IDEInfo";
+    public static final String PROP_IDE_HEARTBEAT = "IDEHeartbeat";
 
     // 心跳超时时间：2分钟内没收到心跳，认为控制端掉线
     private static final long HEARTBEAT_TIMEOUT_MS = 2 * 60 * 1000L;
@@ -48,9 +48,9 @@ public class IDEConnectionManager extends BaseSample {
     private static final long HEARTBEAT_CHECK_INTERVAL_SEC = 30;
 
     // 当前连接状态（内存缓存，避免每次查属性）
-    private volatile boolean connected        = false;
-    private volatile String  currentClientId  = "";
-    private volatile long    lastHeartbeatMs  = 0;
+    private volatile boolean connected = false;
+    private volatile String currentClientId = "";
+    private volatile long lastHeartbeatMs = 0;
 
     // 心跳超时检查定时器
     private final ScheduledExecutorService scheduler =
@@ -72,22 +72,22 @@ public class IDEConnectionManager extends BaseSample {
 
     /**
      * 处理 requestConnect 服务调用
-     *
+     * <p>
      * 控制端传入的 params 示例：
      * {
-     *   "clientId": "ide-client-001",
-     *   "clientInfo": "user:张三 ip:192.168.1.100"
+     * "clientId": "ide-client-001",
+     * "clientInfo": "user:张三 ip:192.168.1.100"
      * }
-     *
+     * <p>
      * 回复给控制端的 OutputParams：
      * {
-     *   "success": true/false,
-     *   "message": "连接成功" / "当前已被 ide-client-001 占用"
+     * "success": true/false,
+     * "message": "连接成功" / "当前已被 ide-client-001 占用"
      * }
      */
     public void handleRequestConnect(Map<String, ValueWrapper> params,
                                      RequestConnectCallback callback) {
-        String clientId   = getStringParam(params, "clientId",   "unknown");
+        String clientId = getStringParam(params, "clientId", "unknown");
         String clientInfo = getStringParam(params, "clientInfo", "");
 
         ALog.i(TAG, "收到 requestConnect 申请: clientId=" + clientId
@@ -127,7 +127,7 @@ public class IDEConnectionManager extends BaseSample {
 
     /**
      * 处理 requestDisconnect 服务调用（控制端主动断开）
-     *
+     * <p>
      * 控制端传入的 params 示例：
      * { "clientId": "ide-client-001" }
      */
@@ -155,7 +155,7 @@ public class IDEConnectionManager extends BaseSample {
 
     /**
      * 处理 ideHeartbeat 服务调用（控制端定时心跳）
-     *
+     * <p>
      * 控制端传入的 params 示例：
      * { "clientId": "ide-client-001" }
      */
@@ -186,7 +186,7 @@ public class IDEConnectionManager extends BaseSample {
      * 加锁：更新内存状态 + 上报三个属性到云端
      */
     private void doLock(String clientId, String clientInfo) {
-        connected       = true;
+        connected = true;
         currentClientId = clientId;
         lastHeartbeatMs = System.currentTimeMillis();
 
@@ -196,7 +196,7 @@ public class IDEConnectionManager extends BaseSample {
         String ideInfoJson = "{\"clientId\":\"" + clientId + "\","
                 + "\"clientInfo\":" + (isValidJson(clientInfo) ? clientInfo : "\"" + clientInfo + "\"") + ","
                 + "\"connectTime\":" + lastHeartbeatMs + "}";
-        props.put(PROP_IDE_INFO,      new ValueWrapper.StringValueWrapper(ideInfoJson));
+        props.put(PROP_IDE_INFO, new ValueWrapper.StringValueWrapper(ideInfoJson));
         props.put(PROP_IDE_HEARTBEAT, new ValueWrapper.StringValueWrapper(String.valueOf(lastHeartbeatMs)));
 //        props.put(PROP_IDE_INFO,          new ValueWrapper.StringValueWrapper(
 //                "clientId:" + clientId + " " + clientInfo));
@@ -215,14 +215,14 @@ public class IDEConnectionManager extends BaseSample {
      * 解锁：更新内存状态 + 清空云端属性
      */
     private void doUnlock() {
-        connected       = false;
+        connected = false;
         currentClientId = "";
         lastHeartbeatMs = 0;
 
         Map<String, ValueWrapper> props = new HashMap<>();
         props.put(PROP_HAS_IDE_CONNECTED, new ValueWrapper.BooleanValueWrapper(0));
-        props.put(PROP_IDE_INFO,          new ValueWrapper.StringValueWrapper(""));
-        props.put(PROP_IDE_HEARTBEAT,     new ValueWrapper.StringValueWrapper("0"));
+        props.put(PROP_IDE_INFO, new ValueWrapper.StringValueWrapper(""));
+        props.put(PROP_IDE_HEARTBEAT, new ValueWrapper.StringValueWrapper("0"));
 
         reportProperties(props, "doUnlock");
     }
@@ -277,6 +277,18 @@ public class IDEConnectionManager extends BaseSample {
                 doUnlock();
             }
         }, HEARTBEAT_CHECK_INTERVAL_SEC, HEARTBEAT_CHECK_INTERVAL_SEC, TimeUnit.SECONDS);
+    }
+
+
+    /**
+     * 校验指定 clientId 是否就是当前已连接的控制端。
+     *
+     * @param clientId 调用方传入的 clientId
+     * @return true = 已连接且 clientId 匹配；false = 未连接或 clientId 不匹配
+     */
+    public boolean isConnectedClient(String clientId) {
+        if (clientId == null || clientId.isEmpty()) return false;
+        return connected && currentClientId.equals(clientId);
     }
 
     /**

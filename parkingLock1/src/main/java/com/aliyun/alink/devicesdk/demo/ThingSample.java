@@ -180,6 +180,19 @@ public class ThingSample extends BaseSample {
                 } else if (SERVICE_DEPLOY_PROJECT.equals(identify)) {
                     // ── 处理 deployProject 服务（下载 + 构建，不启动）────────
                     Map<String, ValueWrapper> params = getInputParams(result);
+                    ValueWrapper _dcw = params.get("clientId");
+                    String deployClientId = (_dcw != null && _dcw.getValue() != null) ? _dcw.getValue().toString() : "";
+                    if (!ideConnectionManager.isConnectedClient(deployClientId)) {
+                        HashMap<String, ValueWrapper> output = new HashMap<>();
+                        output.put("success",   new ValueWrapper.BooleanValueWrapper(0));
+                        output.put("message",   new ValueWrapper.StringValueWrapper(
+                                "deploy rejected: clientId [" + deployClientId + "] is not the connected client"));
+                        output.put("deployLog", new ValueWrapper.StringValueWrapper(""));
+                        itResResponseCallback.onComplete(identify, null, new OutputParams(output));
+                        ALog.w(TAG, "deployProject rejected: clientId=" + deployClientId
+                                + " connectedClient=" + (ideConnectionManager.isConnectedClient(deployClientId) ? "same" : "different or none"));
+                        return;
+                    }
                     deployManager.handleDeploy(params, (success, message, deployLog) -> {
                         HashMap<String, ValueWrapper> output = new HashMap<>();
                         output.put("success",   new ValueWrapper.BooleanValueWrapper(success ? 1 : 0));
@@ -191,6 +204,17 @@ public class ThingSample extends BaseSample {
                 } else if (SERVICE_START_PROJECT.equals(identify)) {
                     // ── 处理 startProject 服务（后台启动，不下载不构建）──────
                     Map<String, ValueWrapper> params = getInputParams(result);
+                    ValueWrapper _scw = params.get("clientId");
+                    String startClientId = (_scw != null && _scw.getValue() != null) ? _scw.getValue().toString() : "";
+                    if (!ideConnectionManager.isConnectedClient(startClientId)) {
+                        HashMap<String, ValueWrapper> output = new HashMap<>();
+                        output.put("success", new ValueWrapper.BooleanValueWrapper(0));
+                        output.put("message", new ValueWrapper.StringValueWrapper(
+                                "start rejected: clientId [" + startClientId + "] is not the connected client"));
+                        itResResponseCallback.onComplete(identify, null, new OutputParams(output));
+                        ALog.w(TAG, "startProject rejected: clientId=" + startClientId);
+                        return;
+                    }
                     startManager.handleStartProject(params, (success, message) -> {
                         HashMap<String, ValueWrapper> output = new HashMap<>();
                         output.put("success", new ValueWrapper.BooleanValueWrapper(success ? 1 : 0));
