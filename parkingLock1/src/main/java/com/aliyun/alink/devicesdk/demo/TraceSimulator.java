@@ -304,12 +304,12 @@ public class TraceSimulator extends BaseSample {
             activeLatch.set(latch);
             activeSuccess.set(success);
             activeToken.set(token);
-
-            ALog.d(TAG, "PUBLISH seq=" + seq
-                    + " frames=" + frameCount
-                    + " ts=[" + tsStart + "~" + tsEnd + "]"
-                    + " totalSent=" + totalSent + "/" + MAX_FRAMES
-                    + " size=" + payloadStr.length() + "B");
+            ALog.d(TAG, "PUBLISH seq=" + seq + " totalSent=" + totalSent + "/" + MAX_FRAMES);
+//            ALog.d(TAG, "PUBLISH seq=" + seq
+//                    + " frames=" + frameCount
+//                    + " ts=[" + tsStart + "~" + tsEnd + "]"
+//                    + " totalSent=" + totalSent + "/" + MAX_FRAMES
+//                    + " size=" + payloadStr.length() + "B");
 
             MqttPublishRequest request = new MqttPublishRequest();
             request.topic      = buildTopic();

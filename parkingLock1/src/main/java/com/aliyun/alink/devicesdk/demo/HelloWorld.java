@@ -71,6 +71,7 @@ public class HelloWorld {
 
 
     public void init(final DeviceInfoData deviceInfoData) {
+        ALog.setLevel(ALog.LEVEL_INFO);
         this.pk = deviceInfoData.productKey;
         this.dn = deviceInfoData.deviceName;
         LinkKitInitParams params = new LinkKitInitParams();
@@ -147,8 +148,9 @@ public class HelloWorld {
        testDeviceModel();
 
         // 启动 Trace 模拟发送器
-//        TraceSimulator simulator = new TraceSimulator(pk, dn);
-//        simulator.start();
+        TraceSimulator simulator = new TraceSimulator(pk, dn);
+        //TraceSimulatorQuick simulator = new TraceSimulatorQuick(pk, dn);
+        simulator.start();
 
        /** 测试单纯mqtt通信能力
         * 物模型用例json的格式，用户可以通过自定义的topic使用自定义的格式, 用户可以使用SDK中单纯的mqtt通信能力满足这方面的开发需求
