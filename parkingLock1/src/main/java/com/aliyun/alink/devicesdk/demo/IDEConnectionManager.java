@@ -5,6 +5,7 @@ import com.aliyun.alink.linksdk.tmp.device.payload.ValueWrapper;
 import com.aliyun.alink.linksdk.tmp.listener.IPublishResourceListener;
 import com.aliyun.alink.linksdk.tools.AError;
 import com.aliyun.alink.linksdk.tools.ALog;
+import com.aliyun.alink.utils.StringUtils;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -164,8 +165,12 @@ public class IDEConnectionManager extends BaseSample {
         String clientId = getStringParam(params, "clientId", "unknown");
 
         if (!connected || !currentClientId.equals(clientId)) {
-            callback.onResult(false, "心跳失败：你不是当前连接者");
-            return;
+            //当前工控机如果重连，会置空之前IDE的连接消息，所以currentClientId为"",为空就不用判断心跳了
+            if (currentClientId != null || !currentClientId.isEmpty()) {
+                callback.onResult(false, "心跳失败：你不是当前连接者,当前连接者Id" + currentClientId +
+                        ",你的Id:" + clientId);
+                return;
+            }
         }
 
         // 更新内存心跳时间
