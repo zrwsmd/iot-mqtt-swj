@@ -63,7 +63,7 @@ public class TraceSimulator extends BaseSample {
     private final int batchSize;
 
     // 最大发送帧数，到达后自动停止
-    private static final long MAX_FRAMES = 10000;
+    private static final long MAX_FRAMES = 1000000;
 
     // 单包发送失败最大重试次数
     private static final int MAX_RETRY = 3;
@@ -104,7 +104,7 @@ public class TraceSimulator extends BaseSample {
      * 默认：1ms 采集周期，每包 100 个 frame，每 100ms 发一次
      */
     public TraceSimulator(String pk, String dn) {
-        this(pk, dn, 1, 100);
+        this(pk, dn, 1, 3000);
     }
 
     /**
